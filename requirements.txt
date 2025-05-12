@@ -6,3 +6,7 @@ pypdf
 python-telegram-bot
 nest-asyncio
 langchain_community
+python-docx
+pandas
+openpyxl
+xlrd
