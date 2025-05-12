@@ -10,3 +10,6 @@ python-docx
 pandas
 openpyxl
 xlrd
+langchain-text-splitters
+langchain-core
+langchain-community
