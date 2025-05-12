@@ -1,8 +1,0 @@
-python-dotenv
-langchain
-langchain-chroma
-langchain-gigachat
-pypdf
-python-telegram-bot
-nest-asyncio
-langchain_community
