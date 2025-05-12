@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from dotenv import load_dotenv
 import nest_asyncio
 
@@ -32,15 +33,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Дефолтные настройки
+# Дефолтные настройки из окружения
 ENV_API_KEY = os.getenv('GIGA_API_KEY')
 API_KEY = None
 MODEL = "GigaChat-2"  # по умолчанию Lite
 
 system_prompt = (
     "Ты должен ответить на вопрос пользователя, строго используя только предоставленный контекст из книги. "
-    "Если информация явно отсутствует, ответь: 'данные не найдены'.\n"
-    "Если данные в контексте присутствуют, дай максимально развернутый ответ.\n"
+    "Если информация явно отсутствует, ответь: 'данные не найдены'."
+    "Если данные в контексте присутствуют, дай максимально развернутый ответ."
     "{context}"
 )
 prompt = ChatPromptTemplate.from_messages([
@@ -48,13 +49,18 @@ prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-
 def prepare_data(docs, api_key: str):
+    """Создает Chroma в памяти и возвращает объект vectorstore и retriever."""
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = splitter.split_documents(docs)
     embeddings = GigaChatEmbeddings(credentials=api_key, verify_ssl_certs=False)
-    vect = Chroma.from_documents(documents=splits, embedding=embeddings)
-    return vect.as_retriever()
+    # Используем in-memory базу без persist_directory, чтобы избежать блокировок файлов
+    vect = Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings
+    )
+    retriever = vect.as_retriever()
+    return vect, retriever
 
 
 def create_rag_chain(retriever, api_key: str, model: str):
@@ -80,8 +86,8 @@ async def set_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global MODEL
     if not context.args:
         await update.message.reply_text(
-            "Использование: /set_model <Lite|Max|Pro>\n" +
-            "Lite -> GigaChat-2 (по умолчанию)\nMax -> GigaChat-2-Max\nPro -> GigaChat-2-Pro"
+            "Использование: /set_model <Lite|Max|Pro>" +
+            "Lite -> GigaChat-2 (по умолчанию) Max -> GigaChat-2-Max Pro -> GigaChat-2-Pro"
         )
         return
     choice = context.args[0].lower()
@@ -96,10 +102,25 @@ async def set_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(f"Модель установлена: {MODEL}")
 
+async def clear_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Удаляет persist_directory Chroma и сбрасывает RAG-цепочку.
+    """
+    # Останавливаем использование старой цепочки
+    context.application.bot_data['rag_chain'] = None
+    context.application.bot_data['vectorstore'] = None
+    # Удаляем папку с БД векторов
+    db_dir = 'chroma_db'
+    if os.path.exists(db_dir):
+        shutil.rmtree(db_dir)
+        await update.message.reply_text('Embedding база очищена.')
+    else:
+        await update.message.reply_text('Embedding база уже пуста.')
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        'Привет! Перед загрузкой документа можно установить /set_key и /set_model.\n'
-        'По умолчанию модель Lite, ключ из .env если задан.'
+        'Привет! Перед загрузкой документа можно установить /set_key и /set_model.'
+        'После загрузки можно очистить базу через /clear_db.'
     )
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,8 +135,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive(file_path)
     try:
         docs = load_document(file_path)
-        retriever = prepare_data(docs, key)
+        vect, retriever = prepare_data(docs, key)
         rag_chain = create_rag_chain(retriever, key, MODEL)
+        context.application.bot_data['vectorstore'] = vect
         context.application.bot_data['rag_chain'] = rag_chain
         await update.message.reply_text('Документ загружен и проиндексирован, можно задавать вопросы.')
     except Exception as e:
@@ -134,9 +156,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(os.getenv('TELEGRAM_TOKEN')).build()
     application.bot_data['rag_chain'] = None
+    application.bot_data['vectorstore'] = None
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("set_key", set_key))
     application.add_handler(CommandHandler("set_model", set_model))
+    application.add_handler(CommandHandler("clear_db", clear_db))
     application.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, handle_document))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     nest_asyncio.apply()
