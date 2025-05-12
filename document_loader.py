@@ -16,9 +16,7 @@ def load_document(file_path: str):
     elif ext == '.csv':
         return CSVLoader(file_path).load()
     elif ext in ('.xlsx', '.xls'):
-        # Выбираем движок: openpyxl для xlsx, xlrd для xls
         engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
-        # Чтение всех листов
         sheets = pd.read_excel(file_path, sheet_name=None, engine=engine)
         docs = []
         for sheet_name, df in sheets.items():
