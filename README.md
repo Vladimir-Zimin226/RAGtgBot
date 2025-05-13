@@ -35,7 +35,7 @@ my-telegram-bot-project/
 
 ```bash
 git clone https://github.com/Vladimir-Zimin226/RAGtgBot.git
-cd my-telegram-bot-project
+cd RAGtgBot
 ```
 2. Создайте и активируйте виртуальное окружение:
 
